@@ -1,13 +1,23 @@
 import cv2
+import glob
 import numpy as np
+import time
+from pyzbar.pyzbar import decode
+from PIL import Image
 
-threasholdValue = 1000 # VALUE DETERMINE APPROXIMATE CIRCLE COLOURED VALUE
-pathImage = "C:/Users/venar/Downloads/newt1.jpg"
-questions=10
-choices=4
-heightImg = questions * 100
-widthImg  = choices * 100
-ans= {1: 1, 2: 3, 3: 2, 4: 3, 5: 2, 6: 2, 7: 2, 8: 1, 9: 3, 10: 3}
+def barcodeReader(image):
+    # Decode the barcode image
+    detectedBarcodes = decode(image)
+
+    # If not detected then print the message
+    if not detectedBarcodes:
+        print("Barcode Not Detected or your barcode is blank/corrupted!")
+    else:
+        # Traverse through all the detected barcodes in image
+        for barcode in detectedBarcodes:
+            if barcode.data != "":
+                data = barcode.data.decode('utf-8')
+                return data.split(",")
 
 def reorder(myPoints):
     myPoints = myPoints.reshape((4, 2)) # REMOVE EXTRA BRACKET
@@ -46,55 +56,72 @@ def splitBoxes(img, questions, choices):
             boxes.append(box)
     return boxes
 
-img = cv2.imread('omrt1.jpg')
-img = cv2.resize(img, (widthImg, heightImg)) # RESIZE IMAGE
-imgGray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) # CONVERT IMAGE TO GRAY SCALE
-imgBlur = cv2.GaussianBlur(imgGray, (5, 5), 1) # ADD GAUSSIAN BLUR
-imgCanny = cv2.Canny(imgBlur,10,70) # APPLY CANNY
+start = time.time()
+threasholdValue = 1000 # VALUE DETERMINE APPROXIMATE CIRCLE COLOURED VALUE
+pathImage = "Datas/*.jpg"
+ans= {1: 1, 2: 3, 3: 2, 4: 3, 5: 2, 6: 2, 7: 2, 8: 1, 9: 3, 10: 4}
+path = glob.glob(pathImage)
 
-try:
-    contours, hierarchy = cv2.findContours(imgCanny, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) # FIND ALL CONTOURS
-    rectCon = rectContour(contours) # FILTER FOR RECTANGLE CONTOURS
-    biggestPoints= getCornerPoints(rectCon[0]) # GET CORNER POINTS OF THE BIGGEST RECTANGLE
+for imageData in path:
+    img = cv2.imread(imageData)
+    barcodeData = barcodeReader(Image.open(imageData))
+    questions = int(barcodeData[0])
+    choices = int(barcodeData[1])
+    regno = barcodeData[2]
+    heightImg = questions * 100
+    widthImg = choices * 100
+    img = cv2.resize(img, (widthImg, heightImg))  # RESIZE IMAGE
+    imgGray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)  # CONVERT IMAGE TO GRAY SCALE
+    imgBlur = cv2.GaussianBlur(imgGray, (5, 5), 1)  # ADD GAUSSIAN BLUR
+    imgCanny = cv2.Canny(imgBlur, 10, 70)  # APPLY CANNY
 
-    if biggestPoints.size != 0 : # BIGGEST RECTANGLE WARPING
-        biggestPoints=reorder(biggestPoints) # REORDER FOR WARPING
-        pts1 = np.float32(biggestPoints) # PREPARE POINTS FOR WARP
-        pts2 = np.float32([[0, 0],[widthImg, 0], [0, heightImg],[widthImg, heightImg]]) # PREPARE POINTS FOR WARP
-        matrix = cv2.getPerspectiveTransform(pts1, pts2) # GET TRANSFORMATION MATRIX
-        imgWarpColored = cv2.warpPerspective(img, matrix, (widthImg, heightImg)) # APPLY WARP PERSPECTIVE
+    try:
+        contours, hierarchy = cv2.findContours(imgCanny, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)  # FIND ALL CONTOURS
+        rectCon = rectContour(contours)  # FILTER FOR RECTANGLE CONTOURS
+        biggestPoints = getCornerPoints(rectCon[0])  # GET CORNER POINTS OF THE BIGGEST RECTANGLE
+        # print(barcodeReader(getCornerPoints(rectCon[1])))
 
-        # APPLY THRESHOLD
-        imgWarpGray = cv2.cvtColor(imgWarpColored,cv2.COLOR_BGR2GRAY) # CONVERT TO GRAYSCALE
-        imgThresh = cv2.threshold(imgWarpGray, 170, 255,cv2.THRESH_BINARY_INV )[1] # APPLY THRESHOLD AND INVERSE
-        boxes = splitBoxes(imgThresh, questions, choices) # GET INDIVIDUAL BOXES
-        countQuestions = 0
-        boxIndex = 0
-        choiceSelected = -1
-        answersMarked = {}
+        if biggestPoints.size != 0:  # BIGGEST RECTANGLE WARPING
+            biggestPoints = reorder(biggestPoints)  # REORDER FOR WARPING
+            pts1 = np.float32(biggestPoints)  # PREPARE POINTS FOR WARP
+            pts2 = np.float32([[0, 0], [widthImg, 0], [0, heightImg], [widthImg, heightImg]])  # PREPARE POINTS FOR WARP
+            matrix = cv2.getPerspectiveTransform(pts1, pts2)  # GET TRANSFORMATION MATRIX
+            imgWarpColored = cv2.warpPerspective(img, matrix, (widthImg, heightImg))  # APPLY WARP PERSPECTIVE
 
-        for image in boxes:
-            boxIndex +=1
-            blackPixels = (np.sum(image == 255)) # FIND BLACK PIXELS INSIDE BOXES
-            marked = boxIndex % 4
+            # APPLY THRESHOLD
+            imgWarpGray = cv2.cvtColor(imgWarpColored, cv2.COLOR_BGR2GRAY)  # CONVERT TO GRAYSCALE
+            imgThresh = cv2.threshold(imgWarpGray, 170, 255, cv2.THRESH_BINARY_INV)[1]  # APPLY THRESHOLD AND INVERSE
+            boxes = splitBoxes(imgThresh, questions, choices)  # GET INDIVIDUAL BOXES
+            countQuestions = 0
+            boxIndex = 0
+            choiceSelected = -1
+            answersMarked = {}
 
-            if blackPixels > threasholdValue : # COMPARE BLACK PIXELS WITH THRESHOLD VALUES
-                choiceSelected = 4 if boxIndex % 4 == 0 else marked
+            for image in boxes:
+                boxIndex += 1
+                blackPixels = (np.sum(image == 255))  # FIND BLACK PIXELS INSIDE BOXES
+                marked = boxIndex % 4
 
-            if marked == 0 :
-                countQuestions += 1
-                answersMarked.update({countQuestions : choiceSelected})
+                if blackPixels > threasholdValue: # COMPARE BLACK PIXELS WITH THRESHOLD VALUES
+                    choiceSelected = 4 if boxIndex % 4 == 0 else marked
 
-        print("USER ANSWERS", answersMarked)
-        correctAnswers=0
+                if marked == 0:
+                    countQuestions += 1
+                    answersMarked.update({countQuestions: choiceSelected})
 
-        for x, y in answersMarked.items():
-            if ans[x] == y :  # FIND CORRECT ANSWER
-                correctAnswers += 1
+            print("USER ANSWERS", answersMarked)
+            correctAnswers = 0
 
-        score = (correctAnswers / questions) * 100  # FINAL GRADE
-        print("CORRECT ANSWERS : ", correctAnswers)
-        print("SCORE :", score)
+            for x, y in answersMarked.items():
+                if ans[x] == y:  # FIND CORRECT ANSWER
+                    correctAnswers += 1
 
-except Exception as e:
-    print(str(e))
+            score = (correctAnswers / questions) * 100  # FINAL GRADE
+            print("CORRECT ANSWERS : ", correctAnswers)
+            print("SCORE :", score)
+
+    except Exception as e:
+        print(str(e))
+
+print ("RUNNING TIME :", time.time()-start, "SECONDS")
+print("TOTAL IMAGE PROCESSED", len(path))
